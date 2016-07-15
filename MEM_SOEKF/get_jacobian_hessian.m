@@ -5,9 +5,11 @@ function [ f_func_g, f_jacobian, f_hessian] = get_jacobian_hessian(motionmodel, 
 %       h1_var:     variance of multiplicatice error h1
 %       h2_var:     variance of multiplicatice error h2
 % Output:
-%       func_g:         quadratic function
-%       jacobian_mat:   Jacobian matrix of func_g with modified substitution
-%       hessian_mat:    Hessian matrix of funct_g with modified substitution
+%       f_func_g:         quadratic function handle
+%       f_jacobian_mat:   handle of Jacobian matrix of func_g with modified
+%                         substitution
+%       f_hessian_mat:    handle of Hessian matrix of funct_g with modified
+%                         substitution
 
 syms m1 m2 h1 h2 l1 l2 v1 v2 s1 s2 a
 

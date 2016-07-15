@@ -8,9 +8,9 @@ function [ x_est, x_cov ] = measurement_update(mem_x_pre, mem_cov_pre, meas, ...
 %       mem_cov_pre:    previous covariance matrix 
 %                       5x5 for 'static', 7x7 for 'NCV'
 %       meas:           measurement, 2x1 
-%       func_g:         quadratic function handle, output of GET_JACOBIAN_HESSIAN function
-%       jacobian:       Jacobian of func_g, output of GET_JACOBIAN_HESSIAN function
-%       hessian:        Hessians of func_g, output of GET_JACOBIAN_HESSIAN function
+%       f_func_g:         quadratic function handle, output of GET_JACOBIAN_HESSIAN function
+%       f_jacobian:       handle of Jacobian of func_g, output of GET_JACOBIAN_HESSIAN function
+%       f_hessian:        handle of Hessians of func_g, output of GET_JACOBIAN_HESSIAN function
 %       meas_noise_cov: covariance of measurement noise, 2x2
 %       multi_noise_cov: covariance of multiplicative noise, 2x2, diag(h1_var, h2_var)
 % Output:
