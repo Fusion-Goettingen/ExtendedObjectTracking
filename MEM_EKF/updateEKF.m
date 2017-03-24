@@ -21,7 +21,7 @@ y_shift = y - E_y; % shift the measuremet to match central moments
 % Take the 2nd kronecker product of shifted measurements
 % and delete the duplicated element we get the pseudo measurement
 Y = [eye(2),zeros(2,2);0 0 0 1]*kron(y_shift,y_shift); 
-% moments of shape variables
+% moments of pseudo-measurement
 sgm11 = C_yy(1,1);
 sgm12 = C_yy(1,2);
 sgm22 = C_yy(2,2);
