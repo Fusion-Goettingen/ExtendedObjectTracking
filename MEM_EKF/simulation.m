@@ -30,8 +30,8 @@ hat_r0 = [100,100,5,-8]'; % kinematic state: position and velocity
 hat_p0 = [-pi/3,200,90]'; % shape variable: orientation and semi-axes lengths
 hat_x0 = [hat_r0; hat_p0];
 
-C_r0 = blkdiag( 900*eye(2),400*eye(2));
-C_p0 = blkdiag(0.02*eye(1),16*eye(2));
+C_r0 = blkdiag( 900*eye(2),16*eye(2));
+C_p0 = blkdiag(0.02*eye(1),400*eye(2));
 C_x0 = blkdiag(C_r0,C_p0);
 
 
