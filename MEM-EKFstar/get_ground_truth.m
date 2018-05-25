@@ -3,7 +3,8 @@
 % "Tracking the Orientation and Axes Lengths of an Elliptical Extended Object"
 % Shishan Yang and Marcus Baum
 % arXiv preprint, 2018,
-% 
+% https://arxiv.org/abs/1805.03276
+%
 % Further information:
 % http://www.fusion.informatik.uni-goettingen.de
 % https://github.com/Fusion-Goettingen
