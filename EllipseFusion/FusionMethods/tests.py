@@ -1,474 +1,271 @@
+"""
+Author: Kolja Thormann
+
+Contains test cases for different ellipse fusion methods
+"""
+
 import numpy as np
-from numpy.random import normal
-from numpy.random import multivariate_normal as mvn
-from scipy.linalg import sqrtm
 
-import matplotlib.pyplot as plt
-
-from FusionMethods.approximations import particle_approx, ord_fusion, best_or, shape_mean, shape_mean_k, lin_approx,\
-    single_particle_approx_gaussian, error_and_plotting, get_jacobian, best_fusion
-from FusionMethods.helpers import get_ellipse_params, plot_ellipses, gauss_wasserstein
-
-
-def test_all(runs, m_a, l_a, w_a, al_a, rot_a, cov_a, cov_b, n_particles):
-    error_particle = 0
-    error_particle_direct = 0
-    error_particle_direct_sym = 0
-    error_particle_grid = 0
-    error_smean = 0
-    error_smean_k = 0
-    error_reg = 0
-    error_bestparams = 0
-    error_lin = 0
-
-    r = 0
-
-    # test different methods ===========================================================================================
-    while r < runs:
-        if r % 10 == 0:
-            print(r)
-
-        # create gt and measurement from it
-        m_gt = mvn(m_a, cov_a[:2, :2])
-        m_b = mvn(m_gt, cov_b[:2, :2])
-
-        l_gt = np.maximum(normal(l_a, cov_a[3, 3]), 0.1)
-        w_gt = np.maximum(normal(w_a, cov_a[4, 4]), 0.1)
-        al_gt = normal(al_a, cov_a[2, 2])  # - 0.1 * np.pi
-        al_gt %= (2 * np.pi)
-        rot_gt = np.array([
-            [np.cos(al_gt), -np.sin(al_gt)],
-            [np.sin(al_gt), np.cos(al_gt)],
-        ])
-
-        l_b = np.maximum(normal(w_gt, cov_b[3, 3]), 0.1)
-        w_b = np.maximum(normal(l_gt, cov_b[4, 4]), 0.1)
-        al_b = normal(al_gt, cov_b[2, 2]) + 0.5 * np.pi
-        al_b %= (2 * np.pi)
-        rot_b = np.array([
-            [np.cos(al_b), -np.sin(al_b)],
-            [np.sin(al_b), np.cos(al_b)],
-        ])
-
-        A = np.dot(np.dot(rot_a, np.diag([l_a, w_a]) ** 2), rot_a.T)
-        B = np.dot(np.dot(rot_b, np.diag([l_b, w_b]) ** 2), rot_b.T)
-
-        if (not all(np.linalg.eigvals(A) > 0)):
-            print('A is not positiv definite')
-            # print(A)
-            continue
-        elif A.dtype != np.float64:
-            print('A is complex')
-            # print(A)
-            continue
-        if (not all(np.linalg.eigvals(B) > 0)):
-            print('B is not positiv definite')
-            # print(B)
-            continue
-        elif B.dtype != np.float64:
-            print('B is complex')
-            # print(B)
-            continue
-
-        # use particles to calculate mean and variance of A nd B ellipse
-        [e_p, e_d, e_s, e_g] = particle_approx(n_particles, m_a, cov_a, l_a, w_a, al_a, m_b, cov_b, l_b, w_b, al_b,
-                                               m_gt, l_gt, w_gt, al_gt, ['gaussian', 'direct', 'direct_sym'],
-                                               (r + 1) == runs)
-        error_particle += e_p
-        error_particle_direct += e_d
-        error_particle_direct_sym += e_s
-        error_particle_grid += e_g
-
-        # apply ordinary fusion on the originals
-        error_reg += ord_fusion(m_a, cov_a, l_a, w_a, al_a, m_b, cov_b, l_b, w_b, al_b, m_gt, l_gt, w_gt, al_gt,
-                                (r + 1) == runs)
-
-        # apply ordinary fusion on the originals with the best rotation
-        error_bestparams += best_or(m_a, cov_a, l_a, w_a, al_a, m_b, cov_b, l_b, w_b, al_b, m_gt, l_gt, w_gt, al_gt,
-                                    (r + 1) == runs)
-
-        # shape mean
-        error_smean += shape_mean(m_a, A, l_a, w_a, al_a, m_b, B, l_b, w_b, al_b, m_gt, l_gt, w_gt, al_gt,
-                                  (r + 1) == runs)
-
-        # linearization
-        error_lin += lin_approx(m_a, cov_a, A, l_a, w_a, al_a, m_b, cov_b, B, l_b, w_b, al_b, m_gt, l_gt, w_gt, al_gt,
-                                (r + 1) == runs)
-
-        r += 1
-
-    # visualize and print error ========================================================================================
-    bars = np.array([1, 3, 5, 7, 9, 11, 13])
-    ticks = np.array(['Regular', 'Mean of\n shape matrix', 'MMGW-Lin', 'Heuristic', 'MMGW-MC', 'MC GW dir',
-                      'MC GW sym'])
-    plt.bar(1, np.sqrt(error_reg / runs), width=0.5, color='red', align='center')
-    plt.bar(3, np.sqrt(error_smean / runs), width=0.5, color='m', align='center')
-    plt.bar(5, np.sqrt(error_lin / runs), width=0.5, color='deepskyblue', align='center')
-    plt.bar(7, np.sqrt(error_bestparams / runs), width=0.5, color='darkcyan', align='center')
-    plt.bar(9, np.sqrt(error_particle / runs), width=0.5, color='darkgreen', align='center')
-    plt.bar(11, np.sqrt(error_particle_direct / runs), width=0.5, color='green', align='center')
-    plt.bar(13, np.sqrt(error_particle_direct_sym / runs), width=0.5, color='lightgreen', align='center')
-    plt.xticks(bars, ticks)
-    plt.title('GW RMSE')
-    plt.ylim(0.0, 1.5)
-    plt.savefig('gwRmse.svg')
-    plt.show()
-
-    print('Fuse of originals:')
-    print(np.sqrt(error_reg / runs))
-    print('Mean of originals:')
-    print(np.sqrt(error_smean / runs))
-    print('Lin Fuse:')
-    print(np.sqrt(error_lin / runs))
-    print('Fuse of originals with best orientation:')
-    print(np.sqrt(error_bestparams / runs))
-    print('MC fuse:')
-    print(np.sqrt(error_particle / runs))
-    print('MC fuse direct:')
-    print(np.sqrt(error_particle_direct / runs))
-    print('MC fuse direct sym:')
-    print(np.sqrt(error_particle_direct_sym / runs))
+from FusionMethods.ellipse_fusion_methods import mmsr_mc_update, regular_update, mwdp_update, rm_mean_update,\
+    mmsr_lin2_update, mmsr_pf_update
+from FusionMethods.ellipse_fusion_support import sample_m, get_ellipse_params, single_particle_approx_gaussian,\
+    get_jacobian, barycenter, to_matrix
+from FusionMethods.error_and_plotting import gauss_wasserstein, square_root_distance, plot_error_bars,\
+    plot_convergence, plot_ellipses
+from FusionMethods.constants import *
 
 
-def test_convergence(steps, m_prior, l_prior, w_prior, al_prior, cov_a, cov_b, n_particles):
-    save_path = '/home/convergence/'
-    error = np.zeros(steps)
-    error_reg = np.zeros(steps)
-
-    # create gt with sensor A as prior
-    m_gt = m_prior  # mvn(m_a, cov_a[:2, :2])
-
-    l_gt = np.maximum(normal(l_prior, cov_a[3, 3]), 0.1)
-    w_gt = np.maximum(normal(w_prior, cov_a[4, 4]), 0.1)  # np.maximum(normal(w_gt, cov_a[4, 4]), 0.1)
-    al_gt = normal(al_prior, cov_a[2, 2])  # - 0.1 * np.pi
-    al_gt %= (2 * np.pi)
-
-    # get prior in square root space
-    m_prior, el_sr_prior, cov_sr_prior = single_particle_approx_gaussian(m_prior, l_prior, w_prior, al_prior, cov_a,
-                                                                         n_particles, False)
-
-    # get prior for regular state
-    m_prior_reg = m_prior.copy()
-    prior_reg = np.array([al_prior, l_prior, w_prior])
-    cov_prior_reg = cov_a.copy()[2:, 2:]
-
-    # test different methods ===========================================================================================
-    for i in range(steps):
-        if i % 10 == 0:
-            print(i)
-
-        # create measurement from gt (using alternating sensors)
-        if (i % 2) == 0:
-            m_m = m_gt  # mvn(m_gt, cov_b[:2, :2])
-            l_m = np.maximum(normal(w_gt, cov_b[3, 3]), 0.1)
-            w_m = np.maximum(normal(l_gt, cov_b[4, 4]), 0.1)
-            al_m = normal(al_gt, cov_b[2, 2]) + 0.5 * np.pi
-            al_m %= (2 * np.pi)
-            cov_m = cov_b.copy()
-        else:
-            m_m = m_gt  # mvn(m_gt, cov_a[:2, :2])
-            l_m = np.maximum(normal(l_gt, cov_a[3, 3]), 0.1)
-            w_m = np.maximum(normal(w_gt, cov_a[4, 4]), 0.1)
-            al_m = normal(al_gt, cov_a[2, 2])
-            al_m %= (2 * np.pi)
-            cov_m = cov_a.copy()
-
-        # MC approximation =============================================================================================
-
-        # get measurement in square root space
-        m_m, el_sr_m, cov_sr_m = single_particle_approx_gaussian(m_m, l_m, w_m, al_m, cov_m, n_particles, False)
-
-        # get posterior in square root space
-        # fuse A and B via mean and variance
-        S = cov_sr_prior + cov_sr_m
-        K = np.dot(cov_sr_prior, np.linalg.inv(S))
-        el_sr_post = el_sr_prior + np.dot(K, el_sr_m - el_sr_prior)
-        cov_sr_post = cov_sr_prior - np.dot(np.dot(K, S), K.T)
-
-        # var_Res = var_A - np.dot(np.dot(K, S), K.T)
-        m_post = 0.5 * (m_prior + m_m)  # mean_Res[:2]
-        el_sr_res = np.array([
-            [el_sr_post[0], el_sr_post[1]],
-            [el_sr_post[1], el_sr_post[2]],
-        ])
-        el_res = np.dot(el_sr_res, el_sr_res)
-
-        error[i] = error_and_plotting(m_post, el_res, m_prior, l_prior, w_prior, al_prior, m_m, l_m, w_m, al_m, m_gt,
-                                      l_gt, w_gt, al_gt, True, 'MC Approximated Fusion',
-                                      save_path + 'exampleMCApprox%i.svg' % i)
-
-        m_prior = m_post
-        el_sr_prior = el_sr_post
-        cov_sr_prior = cov_sr_post
-
-        l_prior, w_prior, al_prior = get_ellipse_params(el_res)
-
-        # regular fusion ===============================================================================================
-
-        # get posterior in square root space
-        # fuse A and B via mean and variance
-        S = cov_prior_reg + cov_m[2:, 2:]
-        K = np.dot(cov_prior_reg, np.linalg.inv(S))
-        post_reg = prior_reg + np.dot(K, np.array([al_m, l_m, w_m]) - prior_reg)
-        cov_post_reg = cov_prior_reg - np.dot(np.dot(K, S), K.T)
-
-        m_post_reg = 0.5 * (m_prior_reg + m_m)
-
-        plot_ellipses(m_prior, prior_reg[1], prior_reg[2], prior_reg[0], m_m, l_m, w_m, al_m, m_gt, l_gt, w_gt, al_gt,
-                      m_post_reg, post_reg[1], post_reg[2], post_reg[0], 'Fusion of Original State',
-                      save_path + 'exampleRegFus%i.svg' % i)
-
-        error_reg[i] = gauss_wasserstein(m_gt, l_gt, w_gt, al_gt, m_post_reg, post_reg[1], post_reg[2], post_reg[0])
-
-        m_prior_reg = m_post_reg
-        prior_reg = post_reg
-        cov_prior_reg = cov_post_reg
-
-    plt.plot(np.arange(1, steps+1), error)
-    plt.savefig(save_path + 'MCApproxError.svg')
-    plt.show()
-    plt.plot(np.arange(1, steps + 1), error_reg)
-    plt.savefig(save_path + 'regFusError.svg')
-    plt.show()
-    plt.plot(np.arange(1, steps + 1), error, color='green', label='MC Fusion')
-    plt.plot(np.arange(1, steps + 1), error_reg, color='red', label='Regular Fusion')
-    plt.legend()
-    plt.savefig(save_path + 'errorComp.svg')
-    plt.show()
+state_dtype = np.dtype([
+    ('x', 'f4', 5),           # [m1, m2, al, l ,w] or [m1, m2, s11, s12, s22]
+    ('cov', 'f4', (5, 5)),    # covariance
+    ('error', 'O'),           # length depends on number of steps
+    ('shape', 'f4', (2, 2)),  # for mean of shape matrix only
+    ('weights', 'O'),         # for particle filter only, length depends on number of particles
+    ('gamma', 'i4'),          # for RM mean, keep track of number of measurements
+    ('name', 'O'),            # name of the fusion method
+    ('color', 'O'),           # color for error plotting
+])
 
 
-def test_convergence_pos(steps, runs, m_prior, l_prior, w_prior, al_prior, cov_a, cov_b, n_particles):
-    save_path = '/home/kthormann/Desktop/research-fusion/research-fusion/Python/EllipseFusion/convergence/'
-    error = np.zeros(steps)
-    error_reg = np.zeros(steps)
-    error_shape = np.zeros(steps)
-    error_params = np.zeros(steps)
-    error_lin = np.zeros(steps)
+def test_convergence_pos(steps, runs, prior, cov_prior, cov_a, cov_b, n_particles, n_particles_pf, save_path):
+    """
+    Test convergence of error for different fusion methods. Creates plot of root mean square error convergence and
+    errors at first and last measurement step. If a uniform prior is given for alpha, ength, and width, the particle
+    based methods use it while the others use the Gaussian prior (assumed to be a Gaussian approximation of the uniform
+    prior). In either case, the position is still Gaussian.
+    :param steps:           Number of measurements
+    :param runs:            Number of MC runs
+    :param prior:           Prior prediction mean (ground truth will be drawn from it each run)
+    :param cov_prior:       Prior prediction covariance (ground truth will be drawn from it each run)
+    :param cov_a:           Noise of sensor A
+    :param cov_b:           Noise of sensor B
+    :param n_particles:     Number of particles for MMGW-MC
+    :param n_particles_pf:  Number of particles for MMGW-PF
+    :param save_path:       Path for saving figures
+    """
+    error = np.zeros(steps*2)
+
+    # setup state for various ellipse fusion methods
+    mmsr_mc = np.zeros(1, dtype=state_dtype)
+    mmsr_mc[0]['error'] = error.copy()
+    mmsr_mc[0]['name'] = 'MMSR-MC'
+    mmsr_mc[0]['color'] = 'greenyellow'
+    mmsr_lin2 = np.zeros(1, dtype=state_dtype)
+    mmsr_lin2[0]['error'] = error.copy()
+    mmsr_lin2[0]['name'] = 'MMSR-Lin'
+    mmsr_lin2[0]['color'] = 'm'
+    mmsr_pf = np.zeros(1, dtype=state_dtype)
+    mmsr_pf[0]['error'] = error.copy()
+    mmsr_pf[0]['name'] = 'MMSR-PF'
+    mmsr_pf[0]['color'] = 'darkgreen'
+    regular = np.zeros(1, dtype=state_dtype)
+    regular[0]['error'] = error.copy()
+    regular[0]['name'] = 'Regular'
+    regular[0]['color'] = 'red'
+    mwdp = np.zeros(1, dtype=state_dtype)
+    mwdp[0]['error'] = error.copy()
+    mwdp[0]['name'] = 'MWDP'
+    mwdp[0]['color'] = 'deepskyblue'
+    rm_mean = np.zeros(1, dtype=state_dtype)
+    rm_mean[0]['error'] = error.copy()
+    rm_mean[0]['name'] = 'RM Mean'
+    rm_mean[0]['color'] = 'orange'
 
     for r in range(runs):
-        print('Run %i of %i' % (r, runs))
-        # create gt with sensor A as prior
-        m_gt = mvn(m_prior, cov_a[:2, :2])
-
-        l_gt = np.maximum(normal(l_prior, cov_a[3, 3]), 0.1)
-        w_gt = np.maximum(normal(w_prior, cov_a[4, 4]), 0.1)  # np.maximum(normal(w_gt, cov_a[4, 4]), 0.1)
-        al_gt = normal(al_prior, cov_a[2, 2])  # - 0.1 * np.pi
-        al_gt %= (2 * np.pi)
+        print('Run %i of %i' % (r+1, runs))
+        # initialize ===================================================================================================
+        # create gt from prior
+        gt = sample_m(prior, cov_prior, False, 1)
 
         # get prior in square root space
-        m_prior, el_sr_prior, cov_sr_prior = single_particle_approx_gaussian(m_prior, l_prior, w_prior, al_prior, cov_a,
-                                                                             n_particles, True)
+        mmsr_mc[0]['x'], mmsr_mc[0]['cov'], particles_mc = single_particle_approx_gaussian(prior, cov_prior,
+                                                                                           n_particles, False)
 
         # get prior for regular state
-        prior_reg = np.array([m_prior[0], m_prior[1], al_prior, l_prior, w_prior])
-        cov_prior_reg = cov_a.copy()
+        regular[0]['x'] = prior.copy()
+        regular[0]['cov'] = cov_prior.copy()
 
-        # get prior for best params
-        prior_params = np.copy(prior_reg)
-        cov_prior_params = np.copy(cov_prior_reg)
+        # get prior for MWDP
+        mwdp[0]['x'] = prior.copy()
+        mwdp[0]['cov'] = cov_prior.copy()
 
-        # get prior for shape mean
-        prior_shape_m = m_prior
-        prior_shape_l = l_prior
-        prior_shape_w = w_prior
-        prior_shape_al = al_prior
-        rot_prior = np.array([
-            [np.cos(al_prior), -np.sin(al_prior)],
-            [np.sin(al_prior),  np.cos(al_prior)],
-        ])
-        prior_shape = np.dot(np.dot(rot_prior, np.diag([l_prior, w_prior])**2), rot_prior.T)
+        # get prior for RM mean
+        rm_mean[0]['x'] = prior.copy()
+        rm_mean[0]['shape'] = to_matrix(prior[AL], prior[L], prior[W], False)
+        rm_mean[0]['cov'] = cov_prior.copy()
+        rm_mean[0]['gamma'] = 1
 
         # get prior for linearization
-        prior_shape_sqrt = sqrtm(prior_shape)
-        prior_lin = np.array([m_prior[0], m_prior[1], prior_shape_sqrt[0, 0], prior_shape_sqrt[1, 0],
-                              prior_shape_sqrt[1, 1]])
-        prior_lin_l = l_prior
-        prior_lin_w = w_prior
-        prior_lin_al = al_prior
-        jac = get_jacobian(l_prior, w_prior, al_prior)
-        prior_lin_cov = np.dot(np.dot(jac, cov_prior_reg), jac.T)
+        # precalculate values
+        prior_shape_sqrt = to_matrix(prior[AL], prior[L], prior[W], True)
+        cossin = np.cos(prior[AL]) * np.sin(prior[AL])
+        cos2 = np.cos(prior[AL]) ** 2
+        sin2 = np.sin(prior[AL]) ** 2
+        # transform per element
+        mmsr_lin2[0]['x'][M] = prior[M]
+        hess = np.zeros((3, 5, 5))
+        hess[0] = np.array([
+            [0, 0, 0,                                   0,                0],
+            [0, 0, 0,                                   0,                0],
+            [0, 0, 2*(prior[W]-prior[L]) * (cos2-sin2), -2*cossin, 2*cossin],
+            [0, 0, -2*cossin,                           0,                0],
+            [0, 0, 2*cossin,                            0,                0],
+        ])
+        mmsr_lin2[0]['x'][2] = prior_shape_sqrt[0, 0] + 0.5 * np.trace(np.dot(hess[0], cov_prior))
+        hess[1] = np.array([
+            [0, 0, 0,                             0,                 0],
+            [0, 0, 0,                             0,                 0],
+            [0, 0, -4*(prior[W]-prior[L])*cossin, cos2-sin2, sin2-cos2],
+            [0, 0, cos2-sin2,                     0,                 0],
+            [0, 0, sin2-cos2,                     0,                 0],
+        ])
+        mmsr_lin2[0]['x'][3] = prior_shape_sqrt[0, 1] + 0.5 * np.trace(np.dot(hess[1], cov_prior))
+        hess[2] = np.array([
+            [0, 0, 0,                                 0,                0],
+            [0, 0, 0,                                 0,                0],
+            [0, 0, 2*(prior[L]-prior[W])*(cos2-sin2), 2*cossin, -2*cossin],
+            [0, 0, 2*cossin,                          0,                0],
+            [0, 0, -2*cossin,                         0,                0],
+        ])
+        mmsr_lin2[0]['x'][4] = prior_shape_sqrt[1, 1] + 0.5 * np.trace(np.dot(hess[2], cov_prior))
 
-        # test different methods =======================================================================================
+        # transform covariance per element
+        jac = get_jacobian(prior[L], prior[W], prior[AL])
+        mmsr_lin2[0]['cov'] = np.dot(np.dot(jac, cov_prior), jac.T)
+        # add Hessian part where Hessian not 0
+        for i in range(3):
+            for j in range(3):
+                mmsr_lin2[0]['cov'][i+2, j+2] += 0.5 * np.trace(np.dot(np.dot(np.dot(hess[i], cov_prior), hess[j]),
+                                                                       cov_prior))
+
+        # get prior for particle filter
+        mmsr_pf[0]['x'], mmsr_pf[0]['cov'], particles_pf = single_particle_approx_gaussian(prior, cov_prior,
+                                                                                           n_particles_pf, False)
+        mmsr_pf[0]['weights'] = np.ones(n_particles_pf) / n_particles_pf
+
+        # test different methods
         for i in range(steps):
             if i % 10 == 0:
-                print(i)
+                print('Step %i of %i' % (i + 1, steps))
+            plot_cond = (r + 1 == runs) & (i + 1 == steps)
 
-            # create measurement from gt (using alternating sensors)
+            # create measurement from gt (using alternating sensors) ===================================================
             if (i % 2) == 0:
-                m_m = mvn(m_gt, cov_b[:2, :2])
-                l_m = np.maximum(normal(w_gt, cov_b[3, 3]), 0.1)
-                w_m = np.maximum(normal(l_gt, cov_b[4, 4]), 0.1)
-                al_m = normal(al_gt, cov_b[2, 2]) + 0.5 * np.pi
-                al_m %= (2 * np.pi)
-                cov_m = cov_b.copy()
+                meas = sample_m(gt, cov_b, True, 1)
+                cov_meas = cov_b.copy()
             else:
-                m_m = mvn(m_gt, cov_a[:2, :2])
-                l_m = np.maximum(normal(l_gt, cov_a[3, 3]), 0.1)
-                w_m = np.maximum(normal(w_gt, cov_a[4, 4]), 0.1)
-                al_m = normal(al_gt, cov_a[2, 2])
-                al_m %= (2 * np.pi)
-                cov_m = cov_a.copy()
+                meas = sample_m(gt, cov_a, False, 1)
+                cov_meas = cov_a.copy()
 
-            # MC approximation =========================================================================================
+            # fusion methods ===========================================================================================
+            mmsr_mc_update(mmsr_mc[0], meas, cov_meas, n_particles, gt, i, steps, plot_cond, save_path, False)
 
-            # get measurement in square root space
-            m_m, el_sr_m, cov_sr_m = single_particle_approx_gaussian(m_m, l_m, w_m, al_m, cov_m, n_particles, True)
+            regular_update(regular[0], meas, cov_meas, gt, i, steps, plot_cond, save_path)
 
-            # get posterior in square root space
-            # fuse A and B via mean and variance
-            S = cov_sr_prior + cov_sr_m
-            K = np.dot(cov_sr_prior, np.linalg.inv(S))
-            el_sr_post = el_sr_prior + np.dot(K, el_sr_m - el_sr_prior)
-            cov_sr_post = cov_sr_prior - np.dot(np.dot(K, S), K.T)
+            mwdp_update(mwdp[0], meas, cov_meas, gt, i, steps, plot_cond, save_path)
 
-            # var_Res = var_A - np.dot(np.dot(K, S), K.T)
-            el_sr_res = np.array([
-                [el_sr_post[2], el_sr_post[3]],
-                [el_sr_post[3], el_sr_post[4]],
-            ])
-            el_res = np.dot(el_sr_res, el_sr_res)
+            rm_mean_update(rm_mean[0], meas, cov_meas, gt, i, steps, plot_cond, save_path)
 
-            error[i] += error_and_plotting(el_sr_post[:2], el_res, el_sr_prior[:2], l_prior, w_prior, al_prior, m_m, l_m,
-                                          w_m, al_m, m_gt, l_gt, w_gt, al_gt, (r + 1) == runs, 'MC Approximated Fusion',
-                                          save_path + 'exampleMCApprox%i.svg' % i, est_color='green')
+            mmsr_lin2_update(mmsr_lin2[0], meas, cov_meas, gt, i, steps, plot_cond, save_path)
 
-            el_sr_prior = el_sr_post
-            cov_sr_prior = cov_sr_post
+            mmsr_pf_update(mmsr_pf[0], meas, cov_meas, particles_pf, n_particles_pf, gt, i, steps, plot_cond, save_path,
+                           False)
 
-            l_prior, w_prior, al_prior = get_ellipse_params(el_res)
+    mmsr_mc[0]['error'] = np.sqrt(mmsr_mc[0]['error'] / runs)
+    mmsr_lin2[0]['error'] = np.sqrt(mmsr_lin2[0]['error'] / runs)
+    mmsr_pf[0]['error'] = np.sqrt(mmsr_pf[0]['error'] / runs)
+    regular[0]['error'] = np.sqrt(regular[0]['error'] / runs)
+    mwdp[0]['error'] = np.sqrt(mwdp[0]['error'] / runs)
+    rm_mean[0]['error'] = np.sqrt(rm_mean[0]['error'] / runs)
 
-            # regular fusion ===========================================================================================
+    # error plotting ===================================================================================================
+    plot_error_bars(np.block([mmsr_mc, mmsr_pf, regular, mwdp, rm_mean, mmsr_lin2]), steps)
+    plot_convergence(np.block([mmsr_mc, mmsr_pf, regular, mwdp, rm_mean, mmsr_lin2]), steps, save_path)
 
-            # get posterior in square root space
-            # fuse A and B via mean and variance
-            S = cov_prior_reg + cov_m
-            K = np.dot(cov_prior_reg, np.linalg.inv(S))
-            post_reg = prior_reg + np.dot(K, np.array([m_m[0], m_m[1], al_m, l_m, w_m]) - prior_reg)
-            cov_post_reg = cov_prior_reg - np.dot(np.dot(K, S), K.T)
 
-            if (r + 1) == runs:
-                plot_ellipses(prior_reg[:2], prior_reg[3], prior_reg[4], prior_reg[2], m_m, l_m, w_m, al_m, m_gt, l_gt,
-                              w_gt, al_gt, post_reg[:2], post_reg[3], post_reg[4], post_reg[2],
-                              'Fusion of Original State', save_path + 'exampleRegFus%i.svg' % i)
+def test_mean(orig, cov, n_particles, save_path):
+    """
+    Compare the mean in original state space with mean in square root space (via MC approximation) in regards of their
+    GW and SR error
+    :param orig:        Mean in original state space
+    :param cov:         Covariance for original state space
+    :param n_particles: Number of particles for MC approximation of SR space mean
+    :param save_path:       Path for saving figures
+    """
+    # approximate mean in SR space
+    vec_mmsr, var_A, vec_particle = single_particle_approx_gaussian(orig, cov, n_particles, True)
+    mat_mmsr = np.array([
+        [vec_mmsr[2], vec_mmsr[3]],
+        [vec_mmsr[3], vec_mmsr[4]]
+    ])
+    mat_mmsr = np.dot(mat_mmsr, mat_mmsr)
+    l_mmsr, w_mmsr, al_mmsr = get_ellipse_params(mat_mmsr)
 
-            error_reg[i] += gauss_wasserstein(m_gt, l_gt, w_gt, al_gt, post_reg[:2], post_reg[3], post_reg[4],
-                                              post_reg[2])
+    # caclulate Barycenter using optimization
+    covs_sr = np.zeros((n_particles, 2, 2))
+    covs_sr[:, 0, 0] = vec_particle[:, 2]
+    covs_sr[:, 0, 1] = vec_particle[:, 3]
+    covs_sr[:, 1, 0] = vec_particle[:, 3]
+    covs_sr[:, 1, 1] = vec_particle[:, 4]
+    covs = np.einsum('xab, xbc -> xac', covs_sr, covs_sr)
+    bary_particles = np.zeros((n_particles, 5))
+    bary_particles[:, M] = vec_particle[:, M]
+    bary_particles[:, 2] = covs[:, 0, 0]
+    bary_particles[:, 3] = covs[:, 0, 1]
+    bary_particles[:, 4] = covs[:, 1, 1]
+    bary = barycenter(bary_particles, np.ones(n_particles) / n_particles, n_particles, particles_sr=vec_particle)
+    mat_mmgw = np.array([
+        [bary[2], bary[3]],
+        [bary[3], bary[4]],
+    ])
+    l_mmgw, w_mmgw, al_mmgw = get_ellipse_params(mat_mmgw)
 
-            prior_reg = post_reg
-            cov_prior_reg = cov_post_reg
+    # approximate error
+    error_orig_gw = 0
+    error_orig_sr = 0
+    error_mmsr_gw = 0
+    error_mmsr_sr = 0
+    error_mmgw_gw = 0
+    error_mmgw_sr = 0
+    for i in range(n_particles):
+        mat_particle = np.array([
+            [vec_particle[i, 2], vec_particle[i, 3]],
+            [vec_particle[i, 3], vec_particle[i, 4]]
+        ])
+        mat_particle = np.dot(mat_particle, mat_particle)
+        l_particle, w_particle, al_particle = get_ellipse_params(mat_particle)
+        error_orig_gw += gauss_wasserstein(vec_particle[i, :2], l_particle, w_particle, al_particle, orig[M], orig[L],
+                                           orig[W], orig[AL])
+        error_orig_sr += square_root_distance(vec_particle[i, :2], l_particle, w_particle, al_particle, orig[M],
+                                              orig[L], orig[W], orig[AL])
+        error_mmsr_gw += gauss_wasserstein(vec_particle[i, :2], l_particle, w_particle, al_particle, vec_mmsr[M],
+                                           l_mmsr, w_mmsr, al_mmsr)
+        error_mmsr_sr += square_root_distance(vec_particle[i, :2], l_particle, w_particle, al_particle, vec_mmsr[M],
+                                              l_mmsr, w_mmsr, al_mmsr)
+        error_mmgw_gw += gauss_wasserstein(vec_particle[i, :2], l_particle, w_particle, al_particle, bary[M], l_mmgw,
+                                           w_mmgw, al_mmgw)
+        error_mmgw_sr += square_root_distance(vec_particle[i, :2], l_particle, w_particle, al_particle, bary[M], l_mmgw,
+                                              w_mmgw, al_mmgw)
+    error_orig_gw = np.sqrt(error_orig_gw / n_particles)
+    error_orig_sr = np.sqrt(error_orig_sr / n_particles)
+    error_mmsr_gw = np.sqrt(error_mmsr_gw / n_particles)
+    error_mmsr_sr = np.sqrt(error_mmsr_sr / n_particles)
+    error_mmgw_gw = np.sqrt(error_mmgw_gw / n_particles)
+    error_mmgw_sr = np.sqrt(error_mmgw_sr / n_particles)
 
-            # best params fusion =======================================================================================
-            [post_params, cov_post_params, k] = best_fusion(prior_params[:2], cov_prior_params, prior_params[3],
-                                                            prior_params[4], prior_params[2], m_m, cov_m, l_m, w_m,
-                                                            al_m)
+    plot_ellipses(vec_mmsr[M], l_mmsr, w_mmsr, al_mmsr, orig[M], orig[L], orig[W], orig[AL], bary[M], l_mmgw, w_mmgw,
+                  al_mmgw, [0, 0], 0, 0, 0, 'MMSE Estimates', save_path + 'mmse.svg', est_color='green')
 
-            if (r + 1) == runs:
-                plot_ellipses(prior_params[:2], prior_params[3], prior_params[4], prior_params[2], m_m, l_m, w_m, al_m,
-                              m_gt, l_gt, w_gt, al_gt, post_params[:2], post_params[3], post_params[4], post_params[2],
-                              'Best Params', save_path + 'exampleBestParams%i.svg' % i)
-
-            error_params[i] += gauss_wasserstein(m_gt, l_gt, w_gt, al_gt, post_params[:2], post_params[3],
-                                                 post_params[4], post_params[2])
-
-            prior_params = post_params
-            cov_prior_params = cov_post_params
-
-            # shape mean ===============================================================================================
-            post_shape_m = 0.5 * (prior_shape_m + m_m)
-            rot_m = np.array([
-                [np.cos(al_m), -np.sin(al_m)],
-                [np.sin(al_m),  np.cos(al_m)],
-            ])
-            m_shape = np.dot(np.dot(rot_m, np.diag([l_m, w_m]) ** 2), rot_m.T)
-            post_shape = 0.5 * (prior_shape + m_shape)
-
-            post_shape_l, post_shape_w, post_shape_al = get_ellipse_params(post_shape)
-
-            if (r + 1) == runs:
-                plot_ellipses(prior_shape_m, prior_shape_l, prior_shape_w, prior_shape_al, m_m, l_m, w_m, al_m, m_gt,
-                              l_gt, w_gt, al_gt, post_shape_m, post_shape_l, post_shape_w, post_shape_al, 'Shape Mean', 'exampleMean.svg')
-
-            error_shape[i] += gauss_wasserstein(m_gt, l_gt, w_gt, al_gt, post_shape_m, post_shape_l, post_shape_w,
-                                                post_shape_al)
-
-            prior_shape_m = post_shape_m
-            prior_shape = post_shape
-            prior_shape_l = post_shape_l
-            prior_shape_w = post_shape_w
-            prior_shape_al = post_shape_al
-
-            # linearization ============================================================================================
-            m_shape_sqrt = sqrtm(m_shape)
-            lin_m = np.array([m_m[0], m_m[1], m_shape_sqrt[0, 0], m_shape_sqrt[1, 0], m_shape_sqrt[1, 1]])
-            jac_m = get_jacobian(l_m, w_m, al_m)
-            cov_m_lin = np.dot(np.dot(jac_m, cov_m), jac_m.T)
-            S_lin = prior_lin_cov + cov_m_lin
-            K_lin = np.dot(prior_lin_cov, np.linalg.inv(S_lin))
-            post_lin = prior_lin + np.dot(K_lin, lin_m - prior_lin)
-            post_lin_cov = prior_lin_cov - np.dot(np.dot(K_lin, S_lin), K_lin.T)
-
-            post_lin_shape = np.array([
-                [post_lin[2], post_lin[3]],
-                [post_lin[3], post_lin[4]],
-            ])
-            post_lin_shape = np.dot(post_lin_shape, post_lin_shape)
-            ellipse_axis_post_lin, v_post_lin = np.linalg.eig(post_lin_shape)
-            ellipse_axis_post_lin = np.sqrt(ellipse_axis_post_lin)
-            post_lin_l, post_lin_w, post_lin_al = get_ellipse_params(post_lin_shape)
-
-            if (r + 1) == runs:
-                plot_ellipses(prior_lin[:2], prior_lin_l, prior_lin_w, prior_lin_al, m_m, l_m, w_m, al_m, m_gt, l_gt,
-                              w_gt, al_gt, post_lin[:2], post_lin_l, post_lin_w, post_lin_al, 'Shape Mean',
-                              'exampleMean.svg')
-
-            error_lin[i] += gauss_wasserstein(m_gt, l_gt, w_gt, al_gt, post_lin[:2], post_lin_l, post_lin_w, post_lin_al)
-
-            prior_lin = post_lin
-            prior_lin_cov = post_lin_cov
-            prior_lin_l = post_lin_l
-            prior_line_w = post_lin_w
-            prior_lin_al = post_lin_al
-
-    error = np.sqrt(error / runs)
-    error_reg = np.sqrt(error_reg / runs)
-    error_shape = np.sqrt(error_shape / runs)
-    error_params = np.sqrt(error_params / runs)
-    error_lin = np.sqrt(error_lin / runs)
-
-    print(error)
-    print(error_params)
-
-    # error first and last
-    bars = np.array([1, 3, 5, 7, 9])
-    ticks = np.array(['Regular', 'Mean of\n shape matrix', 'MMGW-Lin', 'Heuristic', 'MMGW-MC'])
-    plt.bar(0.825, error_reg[0], width=0.25, color='red', align='center')
-    plt.bar(1.175, error_reg[-1], width=0.25, color='red', align='center')
-    plt.bar(2.825, error_shape[0], width=0.25, color='m', align='center')
-    plt.bar(3.175, error_shape[-1], width=0.25, color='m', align='center')
-    plt.bar(4.825, error_lin[0], width=0.25, color='deepskyblue', align='center')
-    plt.bar(5.175, error_lin[-1], width=0.25, color='deepskyblue', align='center')
-    plt.bar(6.825, error_params[0], width=0.25, color='darkcyan', align='center')
-    plt.bar(7.175, error_params[-1], width=0.25, color='darkcyan', align='center')
-    plt.bar(8.825, error[0], width=0.25, color='green', align='center')
-    plt.bar(9.175, error[-1], width=0.25, color='green', align='center')
-    plt.xticks(bars, ticks)
-    plt.title('GW RMSE')
-    plt.ylim(0.0, 1.5)
-    plt.savefig('gwRmse.svg')
-    plt.show()
-
-    plt.plot(np.arange(1, steps+1), error)
-    plt.savefig(save_path + 'MCApproxError.svg')
-    plt.show()
-    plt.plot(np.arange(1, steps + 1), error_reg)
-    plt.savefig(save_path + 'regFusError.svg')
-    plt.show()
-    plt.plot(np.arange(1, steps + 1), error_reg, color='red', label='Regular State')
-    plt.plot(np.arange(1, steps + 1), error_shape, color='m', label='Mean of shape matrix')
-    plt.plot(np.arange(1, steps + 1), error_lin, color='deepskyblue', label='MMGW-Lin')
-    plt.plot(np.arange(1, steps + 1), error_params, color='darkcyan', label='Heuristic')
-    plt.plot(np.arange(1, steps + 1), error, color='green', label='MMGW-MC')
-    plt.legend()
-    plt.xticks([5, 10, 15, 20])
-    plt.savefig(save_path + 'errorComp.svg')
-    plt.show()
+    # print error
+    print('RMGW of original:')
+    print(error_orig_gw)
+    print('RMSR of original:')
+    print(error_orig_sr)
+    print('RMGW of mmsr:')
+    print(error_mmsr_gw)
+    print('RMSR of mmsr:')
+    print(error_mmsr_sr)
+    print('RMGW of mmgw_bary:')
+    print(error_mmgw_gw)
+    print('RMSR of mmgw_bary:')
+    print(error_mmgw_sr)
