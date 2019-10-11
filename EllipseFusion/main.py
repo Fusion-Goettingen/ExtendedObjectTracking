@@ -26,14 +26,14 @@ cov_prior = np.array([
 cov_a = np.array([
     [0.5, 0.0, 0,         0,     0],
     [0.0, 0.5, 0,         0,     0],
-    [0,   0,   0.01*np.pi, 0,     0],
+    [0,   0,   0.5*np.pi, 0,     0],
     [0,   0,   0,         0.5,   0],
     [0,   0,   0,         0,   0.1],
 ])
 cov_b = np.array([
     [0.5, 0.0, 0,         0,     0],
     [0.0, 0.5, 0,         0,     0],
-    [0,   0,   0.01*np.pi, 0,     0],
+    [0,   0,   0.5*np.pi, 0,     0],
     [0,   0,   0,         0.5,   0],  # will be w
     [0,   0,   0,         0,   0.1],  # will be l
 ])
@@ -46,6 +46,6 @@ n_particles_pf = 100000  # number of particles for MMSR-PF
 save_path = './'
 
 # tests ================================================================================================================
-# test_convergence_pos(steps, runs, prior, cov_prior, cov_a, cov_b, n_particles, n_particles_pf, save_path)
+test_convergence_pos(steps, runs, prior, cov_prior, cov_a, cov_b, n_particles, n_particles_pf, save_path)
 # test_mean(prior, cov_prior, n_particles, save_path)
-test_mult(runs, prior, cov_a, cov_b, n_particles, n_particles_pf, save_path)
+# test_mult(runs, prior, cov_a, cov_b, n_particles, n_particles_pf, save_path)

@@ -147,7 +147,7 @@ def sample_m(mean, cov, shift, amount):
     return samp
 
 
-def particle_filter(prior, w, meas, cov_meas, n_particles, ll_type, m_prior, cov_m, use_pos):
+def particle_filter(prior, w, meas, cov_meas, n_particles, ll_type, m_prior, cov_m, use_pos, use_mult):
     """
     Update the particle cloud's (in SR space) weights based on a measurement in original state space; no resampling
     :param prior:       Prior particle density in SR space (shape space if use_bary is True)
@@ -162,17 +162,35 @@ def particle_filter(prior, w, meas, cov_meas, n_particles, ll_type, m_prior, cov
     :param use_pos:     If false, use particles only for shape parameters and fuse position in Kalman fashion
     :return:            Weighted mean of the particles and updated weights
     """
+
+    meas_mm, cov_meas_mm = turn_to_multi_modal(meas, cov_meas)
     # calculate inverse and determinant of measurement covariance assuming independent measurement dimensions
+    # if use_pos:
+    #     cov_meas_inv = np.diag(1.0 / cov_meas.diagonal())
+    #     cov_meas_det = np.linalg.det(cov_meas)
+    # else:
+    #     cov_meas_inv = np.diag(1.0 / cov_meas[2:, 2:].diagonal())
+    #     cov_meas_det = np.linalg.det(cov_meas[2:, 2:])
     if use_pos:
-        cov_meas_inv = np.diag(1.0 / cov_meas.diagonal())
-        cov_meas_det = np.linalg.det(cov_meas)
+        cov_meas_inv = np.zeros(cov_meas_mm.shape)
+        cov_meas_det = np.zeros(len(cov_meas_mm))
     else:
-        cov_meas_inv = np.diag(1.0 / cov_meas[2:, 2:].diagonal())
-        cov_meas_det = np.linalg.det(cov_meas[2:, 2:])
+        cov_meas_inv = np.zeros(cov_meas_mm[:, 2:, 2:].shape)
+        cov_meas_det = np.zeros(len(cov_meas_mm))
+    for i in range(4):
+        if use_pos:
+            cov_meas_inv[i] = np.diag(1.0 / cov_meas_mm[i].diagonal())
+            cov_meas_det[i] = np.linalg.det(cov_meas_mm[i])
+        else:
+            cov_meas_inv[i] = np.diag(1.0 / cov_meas_mm[i, 2:, 2:].diagonal())
+            cov_meas_det[i] = np.linalg.det(cov_meas_mm[i, 2:, 2:])
 
     # update weights with likelihood
     for i in range(n_particles):
-        w[i] *= sr_likelihood(prior[i], cov_meas_inv, cov_meas_det, meas, ll_type)
+        if not use_mult:
+            w[i] *= sr_likelihood(prior[i], cov_meas_inv[0], cov_meas_det[0], meas_mm[0], ll_type)
+        else:
+            w[i] *= sr_likelihood_2(prior[i], cov_meas_inv, cov_meas_det, meas_mm, ll_type)
     w /= np.sum(w)
 
     # calculate weighted mean with updated particle weights
@@ -228,6 +246,59 @@ def sr_likelihood(x, cov_inv, cov_det, meas, ll_type):
             ll[i] = np.exp(-0.5*np.dot(np.dot(nu, cov_inv), nu)) / np.sqrt(32*np.pi**5*cov_det)
         else:
             ll[i] = np.exp(-0.5 * np.dot(np.dot(nu[2:], cov_inv), nu[2:])) / np.sqrt(8 * np.pi ** 3 * cov_det)
+
+    # return sum or maximum depending on ll_type
+    if ll_type == 'sum':
+        return np.sum(ll)
+    elif ll_type == 'max':
+        return np.max(ll)
+    else:
+        print('Invalid likelihood type')
+        return 0
+
+
+def sr_likelihood_2(x, cov_inv, cov_det, meas, ll_type):
+    """
+    Calculate the likelihood of a particle in SR space given a measurement in original state space
+    :param x:       The particle in SR space
+    :param cov_inv: Inverse of measurement covariance
+    :param cov_det: Determinant of measurement covariance
+    :param meas:    Measurement in original state space
+    :param ll_type: Either 'sum' for using the sum of the 4 representations' likelihood or 'max' for using the maximum
+    :return:        Depending on ll_type the sum or maximum of the likelihoods or 0 for an invalid ll_type
+    """
+    # transform particle to original state space
+    x_el = np.zeros(5)
+    x_el[:2] = x[:2]
+    x_shape = np.array([
+        [x[2], x[3]],
+        [x[3], x[4]],
+    ])
+    x_shape = np.dot(x_shape, x_shape)
+    l, w, al = get_ellipse_params(x_shape)
+    x_el[2] = al - 0.5*np.pi
+    x_el[2] %= 2.0*np.pi
+    x_el[3] = w
+    x_el[4] = l
+
+    ll = np.zeros(16)
+
+    # calculate likelihood for all 4 representations in original state space
+    for i in range(4):
+        save = x_el[3]
+        x_el[3] = x_el[4]
+        x_el[4] = save
+        x_el[2] += 0.5 * np.pi
+        x_el[2] %= 2.0 * np.pi
+        for j in range(4):
+            nu = meas[j] - x_el
+            nu[2] = ((nu[2] + np.pi) % (2*np.pi)) - np.pi
+
+            if len(cov_inv[j]) == 5:
+                ll[i*4+j] = np.exp(-0.5 * np.dot(np.dot(nu, cov_inv[j]), nu)) / np.sqrt(32 * np.pi**5 * cov_det[j])
+            else:
+                ll[i*4+j] = np.exp(-0.5 * np.dot(np.dot(nu[2:], cov_inv[j]), nu[2:])) \
+                            / np.sqrt(8 * np.pi**3 * cov_det[j])
 
     # return sum or maximum depending on ll_type
     if ll_type == 'sum':

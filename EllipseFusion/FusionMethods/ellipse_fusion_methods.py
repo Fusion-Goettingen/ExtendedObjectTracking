@@ -224,7 +224,8 @@ def mmsr_lin2_update(mmsr_lin2, meas, cov_meas, gt, i, steps, plot_cond, save_pa
                                                        save_path + 'exampleLin%i.svg' % i)
 
 
-def mmsr_pf_update(mmsr_pf, meas, cov_meas, particles_pf, n_particles_pf, gt, i, steps, plot_cond, save_path, use_pos):
+def mmsr_pf_update(mmsr_pf, meas, cov_meas, particles_pf, n_particles_pf, gt, i, steps, plot_cond, save_path, use_pos,
+                   use_mult):
     """
     Fuse using MMSR-PF; keep estimate in square root space as particle density and update the weights over time; for the
     likelihood, the particles are transformed back and the sum of the likelihoods for all 4 possible representations is
@@ -249,7 +250,7 @@ def mmsr_pf_update(mmsr_pf, meas, cov_meas, particles_pf, n_particles_pf, gt, i,
     mmsr_pf['x'], mmsr_pf['weights'], mmsr_pf['cov'][:2, :2] = particle_filter(particles_pf, mmsr_pf['weights'], meas,
                                                                                cov_meas, n_particles_pf, 'sum',
                                                                                mmsr_pf['x'][M], mmsr_pf['cov'][:2, :2],
-                                                                               use_pos)
+                                                                               use_pos, use_mult)
 
     # save error and plot estimate
     l_post, w_post, al_post = get_ellipse_params_from_sr(mmsr_pf['x'][SR])

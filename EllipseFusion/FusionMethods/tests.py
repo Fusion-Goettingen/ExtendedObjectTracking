@@ -49,15 +49,19 @@ def test_convergence_pos(steps, runs, prior, cov_prior, cov_a, cov_b, n_particle
     mmsr_mc = np.zeros(1, dtype=state_dtype)
     mmsr_mc[0]['error'] = error.copy()
     mmsr_mc[0]['name'] = 'MMSR-MC'
-    mmsr_mc[0]['color'] = 'greenyellow'
-    mmsr_lin2 = np.zeros(1, dtype=state_dtype)
-    mmsr_lin2[0]['error'] = error.copy()
-    mmsr_lin2[0]['name'] = 'MMSR-Lin'
-    mmsr_lin2[0]['color'] = 'm'
+    mmsr_mc[0]['color'] = 'lightgreen'
+    # mmsr_lin2 = np.zeros(1, dtype=state_dtype)
+    # mmsr_lin2[0]['error'] = error.copy()
+    # mmsr_lin2[0]['name'] = 'MMSR-Lin'
+    # mmsr_lin2[0]['color'] = 'm'
     mmsr_pf = np.zeros(1, dtype=state_dtype)
     mmsr_pf[0]['error'] = error.copy()
     mmsr_pf[0]['name'] = 'MMSR-PF'
     mmsr_pf[0]['color'] = 'darkgreen'
+    mmsr_pf2 = np.zeros(1, dtype=state_dtype)
+    mmsr_pf2[0]['error'] = error.copy()
+    mmsr_pf2[0]['name'] = 'MMSR-PF-mult'
+    mmsr_pf2[0]['color'] = 'cyan'
     regular = np.zeros(1, dtype=state_dtype)
     regular[0]['error'] = error.copy()
     regular[0]['name'] = 'Regular'
@@ -65,7 +69,7 @@ def test_convergence_pos(steps, runs, prior, cov_prior, cov_a, cov_b, n_particle
     mwdp = np.zeros(1, dtype=state_dtype)
     mwdp[0]['error'] = error.copy()
     mwdp[0]['name'] = 'MWDP'
-    mwdp[0]['color'] = 'deepskyblue'
+    mwdp[0]['color'] = 'darkcyan'
     rm_mean = np.zeros(1, dtype=state_dtype)
     rm_mean[0]['error'] = error.copy()
     rm_mean[0]['name'] = 'RM Mean'
@@ -95,53 +99,57 @@ def test_convergence_pos(steps, runs, prior, cov_prior, cov_a, cov_b, n_particle
         rm_mean[0]['cov'] = cov_prior.copy()
         rm_mean[0]['gamma'] = 1
 
-        # get prior for linearization
-        # precalculate values
-        prior_shape_sqrt = to_matrix(prior[AL], prior[L], prior[W], True)
-        cossin = np.cos(prior[AL]) * np.sin(prior[AL])
-        cos2 = np.cos(prior[AL]) ** 2
-        sin2 = np.sin(prior[AL]) ** 2
-        # transform per element
-        mmsr_lin2[0]['x'][M] = prior[M]
-        hess = np.zeros((3, 5, 5))
-        hess[0] = np.array([
-            [0, 0, 0,                                   0,                0],
-            [0, 0, 0,                                   0,                0],
-            [0, 0, 2*(prior[W]-prior[L]) * (cos2-sin2), -2*cossin, 2*cossin],
-            [0, 0, -2*cossin,                           0,                0],
-            [0, 0, 2*cossin,                            0,                0],
-        ])
-        mmsr_lin2[0]['x'][2] = prior_shape_sqrt[0, 0] + 0.5 * np.trace(np.dot(hess[0], cov_prior))
-        hess[1] = np.array([
-            [0, 0, 0,                             0,                 0],
-            [0, 0, 0,                             0,                 0],
-            [0, 0, -4*(prior[W]-prior[L])*cossin, cos2-sin2, sin2-cos2],
-            [0, 0, cos2-sin2,                     0,                 0],
-            [0, 0, sin2-cos2,                     0,                 0],
-        ])
-        mmsr_lin2[0]['x'][3] = prior_shape_sqrt[0, 1] + 0.5 * np.trace(np.dot(hess[1], cov_prior))
-        hess[2] = np.array([
-            [0, 0, 0,                                 0,                0],
-            [0, 0, 0,                                 0,                0],
-            [0, 0, 2*(prior[L]-prior[W])*(cos2-sin2), 2*cossin, -2*cossin],
-            [0, 0, 2*cossin,                          0,                0],
-            [0, 0, -2*cossin,                         0,                0],
-        ])
-        mmsr_lin2[0]['x'][4] = prior_shape_sqrt[1, 1] + 0.5 * np.trace(np.dot(hess[2], cov_prior))
-
-        # transform covariance per element
-        jac = get_jacobian(prior[L], prior[W], prior[AL])
-        mmsr_lin2[0]['cov'] = np.dot(np.dot(jac, cov_prior), jac.T)
-        # add Hessian part where Hessian not 0
-        for i in range(3):
-            for j in range(3):
-                mmsr_lin2[0]['cov'][i+2, j+2] += 0.5 * np.trace(np.dot(np.dot(np.dot(hess[i], cov_prior), hess[j]),
-                                                                       cov_prior))
+        # # get prior for linearization
+        # # precalculate values
+        # prior_shape_sqrt = to_matrix(prior[AL], prior[L], prior[W], True)
+        # cossin = np.cos(prior[AL]) * np.sin(prior[AL])
+        # cos2 = np.cos(prior[AL]) ** 2
+        # sin2 = np.sin(prior[AL]) ** 2
+        # # transform per element
+        # mmsr_lin2[0]['x'][M] = prior[M]
+        # hess = np.zeros((3, 5, 5))
+        # hess[0] = np.array([
+        #     [0, 0, 0,                                   0,                0],
+        #     [0, 0, 0,                                   0,                0],
+        #     [0, 0, 2*(prior[W]-prior[L]) * (cos2-sin2), -2*cossin, 2*cossin],
+        #     [0, 0, -2*cossin,                           0,                0],
+        #     [0, 0, 2*cossin,                            0,                0],
+        # ])
+        # mmsr_lin2[0]['x'][2] = prior_shape_sqrt[0, 0] + 0.5 * np.trace(np.dot(hess[0], cov_prior))
+        # hess[1] = np.array([
+        #     [0, 0, 0,                             0,                 0],
+        #     [0, 0, 0,                             0,                 0],
+        #     [0, 0, -4*(prior[W]-prior[L])*cossin, cos2-sin2, sin2-cos2],
+        #     [0, 0, cos2-sin2,                     0,                 0],
+        #     [0, 0, sin2-cos2,                     0,                 0],
+        # ])
+        # mmsr_lin2[0]['x'][3] = prior_shape_sqrt[0, 1] + 0.5 * np.trace(np.dot(hess[1], cov_prior))
+        # hess[2] = np.array([
+        #     [0, 0, 0,                                 0,                0],
+        #     [0, 0, 0,                                 0,                0],
+        #     [0, 0, 2*(prior[L]-prior[W])*(cos2-sin2), 2*cossin, -2*cossin],
+        #     [0, 0, 2*cossin,                          0,                0],
+        #     [0, 0, -2*cossin,                         0,                0],
+        # ])
+        # mmsr_lin2[0]['x'][4] = prior_shape_sqrt[1, 1] + 0.5 * np.trace(np.dot(hess[2], cov_prior))
+        #
+        # # transform covariance per element
+        # jac = get_jacobian(prior[L], prior[W], prior[AL])
+        # mmsr_lin2[0]['cov'] = np.dot(np.dot(jac, cov_prior), jac.T)
+        # # add Hessian part where Hessian not 0
+        # for i in range(3):
+        #     for j in range(3):
+        #         mmsr_lin2[0]['cov'][i+2, j+2] += 0.5 * np.trace(np.dot(np.dot(np.dot(hess[i], cov_prior), hess[j]),
+        #                                                                cov_prior))
 
         # get prior for particle filter
         mmsr_pf[0]['x'], mmsr_pf[0]['cov'], particles_pf = single_particle_approx_gaussian(prior, cov_prior,
                                                                                            n_particles_pf, False)
         mmsr_pf[0]['weights'] = np.ones(n_particles_pf) / n_particles_pf
+
+        mmsr_pf2[0]['x'], mmsr_pf2[0]['cov'], particles_pf2 = single_particle_approx_gaussian(prior, cov_prior,
+                                                                                              n_particles_pf, False)
+        mmsr_pf2[0]['weights'] = np.ones(n_particles_pf) / n_particles_pf
 
         # test different methods
         for i in range(steps):
@@ -166,21 +174,25 @@ def test_convergence_pos(steps, runs, prior, cov_prior, cov_a, cov_b, n_particle
 
             rm_mean_update(rm_mean[0], meas, cov_meas, gt, i, steps, plot_cond, save_path)
 
-            mmsr_lin2_update(mmsr_lin2[0], meas, cov_meas, gt, i, steps, plot_cond, save_path)
+            # mmsr_lin2_update(mmsr_lin2[0], meas, cov_meas, gt, i, steps, plot_cond, save_path)
 
             mmsr_pf_update(mmsr_pf[0], meas, cov_meas, particles_pf, n_particles_pf, gt, i, steps, plot_cond, save_path,
-                           False)
+                           False, False)
+
+            mmsr_pf_update(mmsr_pf2[0], meas, cov_meas, particles_pf, n_particles_pf, gt, i, steps, plot_cond, save_path,
+                           False, True)
 
     mmsr_mc[0]['error'] = np.sqrt(mmsr_mc[0]['error'] / runs)
-    mmsr_lin2[0]['error'] = np.sqrt(mmsr_lin2[0]['error'] / runs)
+    # mmsr_lin2[0]['error'] = np.sqrt(mmsr_lin2[0]['error'] / runs)
     mmsr_pf[0]['error'] = np.sqrt(mmsr_pf[0]['error'] / runs)
+    mmsr_pf2[0]['error'] = np.sqrt(mmsr_pf2[0]['error'] / runs)
     regular[0]['error'] = np.sqrt(regular[0]['error'] / runs)
     mwdp[0]['error'] = np.sqrt(mwdp[0]['error'] / runs)
     rm_mean[0]['error'] = np.sqrt(rm_mean[0]['error'] / runs)
 
     # error plotting ===================================================================================================
-    plot_error_bars(np.block([mmsr_mc, mmsr_pf, regular, mwdp, rm_mean, mmsr_lin2]), steps)
-    plot_convergence(np.block([mmsr_mc, mmsr_pf, regular, mwdp, rm_mean, mmsr_lin2]), steps, save_path)
+    plot_error_bars(np.block([regular, rm_mean, mmsr_mc, mwdp, mmsr_pf, mmsr_pf2]), steps)
+    plot_convergence(np.block([regular, rm_mean, mmsr_mc, mwdp, mmsr_pf, mmsr_pf2]), steps, save_path)
 
 
 def test_mean(orig, cov, n_particles, save_path):
