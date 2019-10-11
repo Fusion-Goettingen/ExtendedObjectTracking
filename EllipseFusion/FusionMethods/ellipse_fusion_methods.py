@@ -7,7 +7,7 @@ Contains various ellipse fusion methods
 import numpy as np
 
 from FusionMethods.ellipse_fusion_support import particle_filter, mwdp_fusion, get_jacobian, get_ellipse_params,\
-    get_ellipse_params_from_sr, single_particle_approx_gaussian, to_matrix
+    get_ellipse_params_from_sr, single_particle_approx_gaussian, to_matrix, turn_to_multi_modal
 from FusionMethods.error_and_plotting import error_and_plotting
 from FusionMethods.constants import *
 
@@ -257,3 +257,63 @@ def mmsr_pf_update(mmsr_pf, meas, cov_meas, particles_pf, n_particles_pf, gt, i,
                                                      w_prior, al_prior, meas[M], meas[L], meas[W], meas[AL], gt[M],
                                                      gt[L], gt[W], gt[AL], plot_cond, 'MMGW-PF',
                                                      save_path + 'exampleMMGWPF%i.svg' % i, est_color='green')
+
+
+def multi_modal_update(mmsr_mult_prior, mmsr_mult_prior_cov, meas, cov_meas, n_particles, prior, gt, plot_cond,
+                       save_path):
+    """
+    Fuses the multi modal density, with each mode representing a different way to parameterize the same ellipse, with a
+    measurement, creating a 16 component density. Next, the density is transformed and averaged in square root space via
+    sampling of particles.
+    :param mmsr_mult_prior:     4 component prior means
+    :param mmsr_mult_prior_cov: Covariances of the components
+    :param meas:                Measurement in original state space
+    :param cov_meas:            Covariance of measurement in original state space
+    :param n_particles:         Number of particles used for approximating the transformed density
+    :param prior:               Prior estimate (for plotting
+    :param gt:                  Ground truth
+    :param plot_cond:           Boolean determining whether to plot the current estimate
+    :param save_path:           Path to save the plots
+    :return:                    The GW and SR error of the fusion
+    """
+    mmsr_mult_meas, mmsr_mult_meas_cov = turn_to_multi_modal(meas, cov_meas)
+    mmsr_mult_post = np.zeros((16, 5))
+    mmsr_mult_post_cov = np.zeros((16, 5, 5))
+    mmsr_mult_post_weights = np.zeros(16)
+    for i in range(4):
+        for j in range(4):
+            nu = mmsr_mult_meas[j] - mmsr_mult_prior[i]
+            nu[2] = (nu[2] + np.pi) % (2*np.pi) - np.pi
+            nu_cov = mmsr_mult_prior_cov[i] + mmsr_mult_meas_cov[j]
+            mmsr_mult_post[i*4+j] = mmsr_mult_prior[i] + np.dot(np.dot(mmsr_mult_prior_cov[i],
+                                                                       np.linalg.inv(nu_cov)), nu)
+            mmsr_mult_post_cov[i*4+j] = mmsr_mult_prior_cov[i] - np.dot(np.dot(mmsr_mult_prior_cov[i],
+                                                                               np.linalg.inv(nu_cov)),
+                                                                        mmsr_mult_prior_cov[i].T)
+            mmsr_mult_post_weights[i*4+j] = -2.5*np.log(2*np.pi) - 0.5*np.log(np.linalg.det(nu_cov)) \
+                                            - 0.5*np.dot(np.dot(nu, np.linalg.inv(nu_cov)), nu)
+
+    mmsr_mult_post_weights -= np.log(np.sum(np.exp(mmsr_mult_post_weights)))
+    mmsr_mult_post_weights = np.exp(mmsr_mult_post_weights)
+
+    # sample from multimodal density to approximate transformation
+    chosen = np.random.choice(16, n_particles, True, p=mmsr_mult_post_weights)
+    particle = np.zeros((n_particles, 5))
+    for i in range(16):
+        if np.sum(chosen == i) > 0:
+            particle[chosen == i] = np.random.multivariate_normal(mmsr_mult_post[i], mmsr_mult_post_cov[i],
+                                                                  np.sum(chosen == i))
+            # transform
+            mult_sr = to_matrix(particle[chosen == i, AL], particle[chosen == i, L], particle[chosen == i, W], True)
+            particle[chosen == i, 2] = mult_sr[:, 0, 0]
+            particle[chosen == i, 3] = mult_sr[:, 0, 1]
+            particle[chosen == i, 4] = mult_sr[:, 1, 1]
+
+    # calculate mean
+    mmsr_mult_final = np.mean(particle, axis=0)
+    mmsr_mult_final_l, mmsr_mult_final_w, mmsr_mult_final_al = get_ellipse_params_from_sr(mmsr_mult_final[2:])
+
+    return error_and_plotting(mmsr_mult_final[M], mmsr_mult_final_l, mmsr_mult_final_w, mmsr_mult_final_al, prior[M],
+                              prior[L], prior[W], prior[AL], meas[M], meas[L], meas[W], meas[AL], gt[M], gt[L], gt[W],
+                              gt[AL], plot_cond, 'Multimodal', save_path + 'exampleMCApprox%i.svg' % 0,
+                              est_color='green')

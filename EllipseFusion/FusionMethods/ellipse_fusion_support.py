@@ -18,7 +18,11 @@ def rot_matrix(alpha):
     :param alpha:   Input orientation
     :return:        Rotation matrix for alpha
     """
-    return np.array([[np.cos(alpha), -np.sin(alpha)], [np.sin(alpha), np.cos(alpha)]])
+    rot = np.array([[np.cos(alpha), -np.sin(alpha)], [np.sin(alpha), np.cos(alpha)]])
+    if len(rot.shape) == 3:
+        return rot.transpose((2, 0, 1))
+    else:
+        return rot
 
 
 def to_matrix(alpha, l, w, sr):
@@ -32,7 +36,11 @@ def to_matrix(alpha, l, w, sr):
     """
     p = 1 if sr else 2
     rot = rot_matrix(alpha)
-    return np.dot(np.dot(rot, np.diag([l, w]) ** p), rot.T)
+    if len(rot.shape) == 3:
+        lw_diag = np.array([np.diag([l[i], w[i]]) for i in range(len(l))])
+        return np.einsum('xab, xbc, xdc -> xad', rot, lw_diag ** p, rot)
+    else:
+        return np.dot(np.dot(rot, np.diag([l, w]) ** p), rot.T)
 
 
 def get_ellipse_params(ell):
@@ -369,3 +377,28 @@ def barycenter(particles, w, n_particles, particles_sr=np.zeros(0)):
     result[4] = bary[1, 1]
 
     return result
+
+
+def turn_to_multi_modal(mean, cov):
+    """
+    Turns an ellipse estimate in original state space into a multi modal density consisting of 4 components, one for
+    each way of representing the same ellipse (reducing the number of possibilities to 4 utilizing the 2pi periodity of
+    the orientation).
+    :param mean:    Mean of the density
+    :param cov:     Covariance of the density
+    :return:        Means and covariances of all 4 modes
+    """
+    mmsr_mult_mean = np.zeros((4, 5))
+    mmsr_mult_cov = np.zeros((4, 5, 5))
+    mmsr_mult_mean[0] = mean.copy()
+    mmsr_mult_cov[0] = cov.copy()
+    for i in range(1, 4):
+        mmsr_mult_mean[i, :2] = mmsr_mult_mean[i - 1, :2]
+        mmsr_mult_mean[i, 2] = (mmsr_mult_mean[i - 1, 2] + 0.5 * np.pi) % (2 * np.pi)
+        mmsr_mult_mean[i, 3] = mmsr_mult_mean[i - 1, 4]
+        mmsr_mult_mean[i, 4] = mmsr_mult_mean[i - 1, 3]
+        mmsr_mult_cov[i, :3, :3] = mmsr_mult_cov[i - 1, :3, :3]
+        mmsr_mult_cov[i, 3, 3] = mmsr_mult_cov[i - 1, 4, 4]
+        mmsr_mult_cov[i, 4, 4] = mmsr_mult_cov[i - 1, 3, 3]
+
+    return mmsr_mult_mean, mmsr_mult_cov

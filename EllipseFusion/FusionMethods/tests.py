@@ -7,9 +7,9 @@ Contains test cases for different ellipse fusion methods
 import numpy as np
 
 from FusionMethods.ellipse_fusion_methods import mmsr_mc_update, regular_update, mwdp_update, rm_mean_update,\
-    mmsr_lin2_update, mmsr_pf_update
+    mmsr_lin2_update, mmsr_pf_update, multi_modal_update
 from FusionMethods.ellipse_fusion_support import sample_m, get_ellipse_params, single_particle_approx_gaussian,\
-    get_jacobian, barycenter, to_matrix
+    get_jacobian, barycenter, to_matrix, turn_to_multi_modal
 from FusionMethods.error_and_plotting import gauss_wasserstein, square_root_distance, plot_error_bars,\
     plot_convergence, plot_ellipses
 from FusionMethods.constants import *
@@ -269,3 +269,67 @@ def test_mean(orig, cov, n_particles, save_path):
     print(error_mmgw_gw)
     print('RMSR of mmgw_bary:')
     print(error_mmgw_sr)
+
+
+def test_mult(runs, prior, cov_prior, cov_meas, n_particles, n_particles_pf, save_path):
+    """
+    Compares fusion of multimodal density before and after transformation. Does not consider correlation between
+    parameters.
+    :param runs:            Number of MC runs
+    :param prior:           Prior prediction mean (ground truth will be drawn from it each run)
+    :param cov_prior:       Prior prediction covariance (ground truth will be drawn from it each run); use sensor A
+                            noise
+    :param cov_meas:        Noise of measurement; use sensor B
+    :param n_particles:     Number of particles for MMGW-MC
+    :param n_particles_pf:  Number of particles for MMGW-PF
+    :param save_path:       Path for saving figures
+    """
+    mmsr_mc = np.zeros(1, dtype=state_dtype)
+    mmsr_mc[0]['error'] = np.zeros(2)
+    mmsr_mc[0]['name'] = 'MMSR-MC'
+    mmsr_mc[0]['color'] = 'greenyellow'
+    mmsr_pf = np.zeros(1, dtype=state_dtype)
+    mmsr_pf[0]['error'] = np.zeros(2)
+    mmsr_pf[0]['name'] = 'MMSR-PF'
+    mmsr_pf[0]['color'] = 'darkgreen'
+    mmsr_mult_error = np.zeros(2)
+
+    for r in range(runs):
+        print('Run %i of %i' % (r + 1, runs))
+        gt = sample_m(prior, cov_prior, False, 1)
+
+        # create measurement from gt (using alternating sensors) =======================================================
+        meas = sample_m(gt, cov_meas, True, 1)
+
+        # get prior in square root space
+        mmsr_mc[0]['x'], mmsr_mc[0]['cov'], particles_mc = single_particle_approx_gaussian(prior, cov_prior,
+                                                                                           n_particles, False)
+        # get prior for particle filter
+        mmsr_pf[0]['x'], mmsr_pf[0]['cov'], particles_pf = single_particle_approx_gaussian(prior, cov_prior,
+                                                                                           n_particles_pf, False)
+        mmsr_pf[0]['weights'] = np.ones(n_particles_pf) / n_particles_pf
+
+        # get prior for multimodal representation
+        mmsr_mult_prior, mmsr_mult_prior_cov = turn_to_multi_modal(prior, cov_prior)
+
+        # update
+        mmsr_mc_update(mmsr_mc[0], meas, cov_meas, n_particles, gt, 0, 1, r == runs-1, save_path, False)
+
+        mmsr_pf_update(mmsr_pf[0], meas, cov_meas, particles_pf, n_particles_pf, gt, 0, 1, r == runs-1, save_path, False)
+
+        # multimodal measurement
+        mmsr_mult_error += multi_modal_update(mmsr_mult_prior, mmsr_mult_prior_cov, meas, cov_meas,
+                                              n_particles_pf * 16, prior, gt, r == runs-1, save_path)
+
+    mmsr_mc[0]['error'] = np.sqrt(mmsr_mc[0]['error'] / runs)
+    mmsr_pf[0]['error'] = np.sqrt(mmsr_pf[0]['error'] / runs)
+    mmsr_mult_error = np.sqrt(mmsr_mult_error / runs)
+
+    print('GW error:')
+    print('MMSR-MC: %f' % mmsr_mc[0]['error'][0])
+    print('MMSR-PF: %f' % mmsr_pf[0]['error'][0])
+    print('MMSR-Mult: %f' % mmsr_mult_error[0])
+    print('SR error:')
+    print('MMSR-MC: %f' % mmsr_mc[0]['error'][1])
+    print('MMSR-PF: %f' % mmsr_pf[0]['error'][1])
+    print('MMSR-Mult: %f' % mmsr_mult_error[1])
