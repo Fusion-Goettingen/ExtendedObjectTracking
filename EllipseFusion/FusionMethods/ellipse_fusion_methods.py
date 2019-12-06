@@ -6,8 +6,8 @@ Contains various ellipse fusion methods
 
 import numpy as np
 
-from FusionMethods.ellipse_fusion_support import particle_filter, mwdp_fusion, get_jacobian, get_ellipse_params,\
-    get_ellipse_params_from_sr, single_particle_approx_gaussian, to_matrix, turn_to_multi_modal
+from FusionMethods.ellipse_fusion_support import particle_filter, mwdp_fusion, get_ellipse_params,\
+    get_ellipse_params_from_sr, single_particle_approx_gaussian, to_matrix
 from FusionMethods.error_and_plotting import error_and_plotting
 from FusionMethods.constants import *
 
@@ -142,90 +142,7 @@ def rm_mean_update(rm_mean, meas, cov_meas, gt, i, steps, plot_cond, save_path):
                                                      save_path + 'exampleRMMean%i.svg' % i)
 
 
-def mmsr_lin2_update(mmsr_lin2, meas, cov_meas, gt, i, steps, plot_cond, save_path):
-    """
-    Fuse using MMSR-Lin2; store state in square root space and estimate measurement in square root space by transforming
-    the measurement covariance using Hessians of the transformation function; Hessian formulas based on M. Roth and
-    F. Gustafsson, “An Efficient Implementation of the Second Order Extended Kalman Filter,” in Proceedings of the 14th
-    International Conference  on  Information  Fusion  (Fusion  2011),  Chicago,  Illinois, USA, July 2011.
-    :param mmsr_lin2:   Current estimate (also stores error); will be modified as a result
-    :param meas:        Measurement in original state space
-    :param cov_meas:    Covariance of measurement in original state space
-    :param gt:          Ground truth
-    :param i:           Current measurement step
-    :param steps:       Total measurement steps
-    :param plot_cond:   Boolean determining whether to plot the current estimate
-    :param save_path:   Path to save the plots
-    """
-    # convert measurement
-    shape_meas_sr = to_matrix(meas[AL], meas[L], meas[W], True)
-
-    # store prior for plotting
-    m_prior = mmsr_lin2['x'][M]
-    l_prior, w_prior, al_prior = get_ellipse_params_from_sr(mmsr_lin2['x'][SR])
-
-    # precalculate values
-    cossin = np.cos(meas[AL]) * np.sin(meas[AL])
-    cos2 = np.cos(meas[AL]) ** 2
-    sin2 = np.sin(meas[AL]) ** 2
-
-    # transform per element
-    meas_lin2 = np.zeros(5)
-    meas_lin2[M] = meas[M]
-    hess = np.zeros((3, 5, 5))
-    hess[0] = np.array([
-        [0, 0, 0,                               0,                0],
-        [0, 0, 0,                               0,                0],
-        [0, 0, 2*(meas[W]-meas[L])*(cos2-sin2), -2*cossin, 2*cossin],
-        [0, 0, -2*cossin,                       0,                0],
-        [0, 0, 2*cossin,                        0,                0],
-    ])
-    meas_lin2[2] = shape_meas_sr[0, 0] + 0.5 * np.trace(np.dot(hess[0], cov_meas))
-    hess[1] = np.array([
-        [0, 0, 0,                           0,                 0],
-        [0, 0, 0,                           0,                 0],
-        [0, 0, -4*(meas[W]-meas[L])*cossin, cos2-sin2, sin2-cos2],
-        [0, 0, cos2-sin2,                   0,                 0],
-        [0, 0, sin2-cos2,                   0,                 0],
-    ])
-    meas_lin2[3] = shape_meas_sr[0, 1] + 0.5 * np.trace(np.dot(hess[1], cov_meas))
-    hess[2] = np.array([
-        [0, 0, 0,                               0,                0],
-        [0, 0, 0,                               0,                0],
-        [0, 0, 2*(meas[L]-meas[W])*(cos2-sin2), 2*cossin, -2*cossin],
-        [0, 0, 2*cossin,                        0,                0],
-        [0, 0, -2*cossin,                       0,                0],
-    ])
-    meas_lin2[4] = shape_meas_sr[1, 1] + 0.5 * np.trace(np.dot(hess[2], cov_meas))
-
-    # transform covariance per element
-    jac = get_jacobian(meas[L], meas[W], meas[AL])
-    cov_meas_lin2 = np.dot(np.dot(jac, cov_meas), jac.T)
-    # add Hessian part where Hessian not 0
-    for k in range(3):
-        for l in range(3):
-            cov_meas_lin2[k+2, l+2] += 0.5 * np.trace(np.dot(np.dot(np.dot(hess[k], cov_meas), hess[l]), cov_meas))
-
-    # Kalman fusion
-    S_lin = mmsr_lin2['cov'] + cov_meas_lin2
-    S_lin_inv = np.linalg.inv(S_lin)
-    if np.iscomplex(S_lin_inv).any():
-        print(cov_meas_lin2)
-        print(S_lin_inv)
-    K_lin = np.dot(mmsr_lin2['cov'], S_lin_inv)
-    mmsr_lin2['x'] = mmsr_lin2['x'] + np.dot(K_lin, meas_lin2 - mmsr_lin2['x'])
-    mmsr_lin2['cov'] = mmsr_lin2['cov'] - np.dot(np.dot(K_lin, S_lin), K_lin.T)
-
-    # save error and plot estimate
-    l_post, w_post, al_post = get_ellipse_params_from_sr(mmsr_lin2['x'][SR])
-    mmsr_lin2['error'][i::steps] += error_and_plotting(mmsr_lin2['x'][M], l_post, w_post, al_post, m_prior, l_prior,
-                                                       w_prior, al_prior, meas[M], meas[L], meas[W], meas[AL], gt[M],
-                                                       gt[L], gt[W], gt[AL], plot_cond, 'Linearization',
-                                                       save_path + 'exampleLin%i.svg' % i)
-
-
-def mmsr_pf_update(mmsr_pf, meas, cov_meas, particles_pf, n_particles_pf, gt, i, steps, plot_cond, save_path, use_pos,
-                   use_mult):
+def mmsr_pf_update(mmsr_pf, meas, cov_meas, particles_pf, n_particles_pf, gt, i, steps, plot_cond, save_path, use_pos):
     """
     Fuse using MMSR-PF; keep estimate in square root space as particle density and update the weights over time; for the
     likelihood, the particles are transformed back and the sum of the likelihoods for all 4 possible representations is
@@ -250,7 +167,7 @@ def mmsr_pf_update(mmsr_pf, meas, cov_meas, particles_pf, n_particles_pf, gt, i,
     mmsr_pf['x'], mmsr_pf['weights'], mmsr_pf['cov'][:2, :2] = particle_filter(particles_pf, mmsr_pf['weights'], meas,
                                                                                cov_meas, n_particles_pf, 'sum',
                                                                                mmsr_pf['x'][M], mmsr_pf['cov'][:2, :2],
-                                                                               use_pos, use_mult)
+                                                                               use_pos)
 
     # save error and plot estimate
     l_post, w_post, al_post = get_ellipse_params_from_sr(mmsr_pf['x'][SR])
@@ -258,63 +175,3 @@ def mmsr_pf_update(mmsr_pf, meas, cov_meas, particles_pf, n_particles_pf, gt, i,
                                                      w_prior, al_prior, meas[M], meas[L], meas[W], meas[AL], gt[M],
                                                      gt[L], gt[W], gt[AL], plot_cond, 'MMGW-PF',
                                                      save_path + 'exampleMMGWPF%i.svg' % i, est_color='green')
-
-
-def multi_modal_update(mmsr_mult_prior, mmsr_mult_prior_cov, meas, cov_meas, n_particles, prior, gt, plot_cond,
-                       save_path):
-    """
-    Fuses the multi modal density, with each mode representing a different way to parameterize the same ellipse, with a
-    measurement, creating a 16 component density. Next, the density is transformed and averaged in square root space via
-    sampling of particles.
-    :param mmsr_mult_prior:     4 component prior means
-    :param mmsr_mult_prior_cov: Covariances of the components
-    :param meas:                Measurement in original state space
-    :param cov_meas:            Covariance of measurement in original state space
-    :param n_particles:         Number of particles used for approximating the transformed density
-    :param prior:               Prior estimate (for plotting
-    :param gt:                  Ground truth
-    :param plot_cond:           Boolean determining whether to plot the current estimate
-    :param save_path:           Path to save the plots
-    :return:                    The GW and SR error of the fusion
-    """
-    mmsr_mult_meas, mmsr_mult_meas_cov = turn_to_multi_modal(meas, cov_meas)
-    mmsr_mult_post = np.zeros((16, 5))
-    mmsr_mult_post_cov = np.zeros((16, 5, 5))
-    mmsr_mult_post_weights = np.zeros(16)
-    for i in range(4):
-        for j in range(4):
-            nu = mmsr_mult_meas[j] - mmsr_mult_prior[i]
-            nu[2] = (nu[2] + np.pi) % (2*np.pi) - np.pi
-            nu_cov = mmsr_mult_prior_cov[i] + mmsr_mult_meas_cov[j]
-            mmsr_mult_post[i*4+j] = mmsr_mult_prior[i] + np.dot(np.dot(mmsr_mult_prior_cov[i],
-                                                                       np.linalg.inv(nu_cov)), nu)
-            mmsr_mult_post_cov[i*4+j] = mmsr_mult_prior_cov[i] - np.dot(np.dot(mmsr_mult_prior_cov[i],
-                                                                               np.linalg.inv(nu_cov)),
-                                                                        mmsr_mult_prior_cov[i].T)
-            mmsr_mult_post_weights[i*4+j] = -2.5*np.log(2*np.pi) - 0.5*np.log(np.linalg.det(nu_cov)) \
-                                            - 0.5*np.dot(np.dot(nu, np.linalg.inv(nu_cov)), nu)
-
-    mmsr_mult_post_weights -= np.log(np.sum(np.exp(mmsr_mult_post_weights)))
-    mmsr_mult_post_weights = np.exp(mmsr_mult_post_weights)
-
-    # sample from multimodal density to approximate transformation
-    chosen = np.random.choice(16, n_particles, True, p=mmsr_mult_post_weights)
-    particle = np.zeros((n_particles, 5))
-    for i in range(16):
-        if np.sum(chosen == i) > 0:
-            particle[chosen == i] = np.random.multivariate_normal(mmsr_mult_post[i], mmsr_mult_post_cov[i],
-                                                                  np.sum(chosen == i))
-            # transform
-            mult_sr = to_matrix(particle[chosen == i, AL], particle[chosen == i, L], particle[chosen == i, W], True)
-            particle[chosen == i, 2] = mult_sr[:, 0, 0]
-            particle[chosen == i, 3] = mult_sr[:, 0, 1]
-            particle[chosen == i, 4] = mult_sr[:, 1, 1]
-
-    # calculate mean
-    mmsr_mult_final = np.mean(particle, axis=0)
-    mmsr_mult_final_l, mmsr_mult_final_w, mmsr_mult_final_al = get_ellipse_params_from_sr(mmsr_mult_final[2:])
-
-    return error_and_plotting(mmsr_mult_final[M], mmsr_mult_final_l, mmsr_mult_final_w, mmsr_mult_final_al, prior[M],
-                              prior[L], prior[W], prior[AL], meas[M], meas[L], meas[W], meas[AL], gt[M], gt[L], gt[W],
-                              gt[AL], plot_cond, 'Multimodal', save_path + 'exampleMCApprox%i.svg' % 0,
-                              est_color='green')

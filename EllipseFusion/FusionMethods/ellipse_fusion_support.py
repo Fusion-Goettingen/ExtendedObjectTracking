@@ -74,13 +74,14 @@ def get_ellipse_params_from_sr(sr):
     return get_ellipse_params(ell)
 
 
-def single_particle_approx_gaussian(prior, cov, n_particles, use_pos):
+def single_particle_approx_gaussian(prior, cov, n_particles, use_pos, sr=True):
     """
     Calculate the particle density of the prior in square root space and approximate it as a Gaussian
     :param prior:       Prior in original state space
     :param cov:         Covariance of the prior
     :param n_particles: Number of particles used for particle approximation
     :param use_pos:     Boolean to determine whether to create the particle cloud for the entire or only the shape state
+    :param sr:          Utilize square root matrix or normal matrix for particles
     :return:            Approximated mean and covariance in square root space and the particle density
     """
     vec_sr = np.zeros((n_particles, 5))
@@ -92,7 +93,7 @@ def single_particle_approx_gaussian(prior, cov, n_particles, use_pos):
     # transform particles into square root space
     for i in range(n_particles):
         # calculate square root
-        Pa_sr = to_matrix(particle[i, AL], particle[i, L], particle[i, W], True)
+        Pa_sr = to_matrix(particle[i, AL], particle[i, L], particle[i, W], sr)
 
         # save transformed particle
         vec_sr[i] = np.array([particle[i, 0], particle[i, 1], Pa_sr[0, 0], Pa_sr[0, 1], Pa_sr[1, 1]])
@@ -147,7 +148,7 @@ def sample_m(mean, cov, shift, amount):
     return samp
 
 
-def particle_filter(prior, w, meas, cov_meas, n_particles, ll_type, m_prior, cov_m, use_pos, use_mult):
+def particle_filter(prior, w, meas, cov_meas, n_particles, ll_type, m_prior, cov_m, use_pos):
     """
     Update the particle cloud's (in SR space) weights based on a measurement in original state space; no resampling
     :param prior:       Prior particle density in SR space (shape space if use_bary is True)
@@ -187,10 +188,7 @@ def particle_filter(prior, w, meas, cov_meas, n_particles, ll_type, m_prior, cov
 
     # update weights with likelihood
     for i in range(n_particles):
-        if not use_mult:
-            w[i] *= sr_likelihood(prior[i], cov_meas_inv[0], cov_meas_det[0], meas_mm[0], ll_type)
-        else:
-            w[i] *= sr_likelihood_2(prior[i], cov_meas_inv, cov_meas_det, meas_mm, ll_type)
+        w[i] *= sr_likelihood(prior[i], cov_meas_inv[0], cov_meas_det[0], meas_mm[0], ll_type)
     w /= np.sum(w)
 
     # calculate weighted mean with updated particle weights
@@ -257,59 +255,6 @@ def sr_likelihood(x, cov_inv, cov_det, meas, ll_type):
         return 0
 
 
-def sr_likelihood_2(x, cov_inv, cov_det, meas, ll_type):
-    """
-    Calculate the likelihood of a particle in SR space given a measurement in original state space
-    :param x:       The particle in SR space
-    :param cov_inv: Inverse of measurement covariance
-    :param cov_det: Determinant of measurement covariance
-    :param meas:    Measurement in original state space
-    :param ll_type: Either 'sum' for using the sum of the 4 representations' likelihood or 'max' for using the maximum
-    :return:        Depending on ll_type the sum or maximum of the likelihoods or 0 for an invalid ll_type
-    """
-    # transform particle to original state space
-    x_el = np.zeros(5)
-    x_el[:2] = x[:2]
-    x_shape = np.array([
-        [x[2], x[3]],
-        [x[3], x[4]],
-    ])
-    x_shape = np.dot(x_shape, x_shape)
-    l, w, al = get_ellipse_params(x_shape)
-    x_el[2] = al - 0.5*np.pi
-    x_el[2] %= 2.0*np.pi
-    x_el[3] = w
-    x_el[4] = l
-
-    ll = np.zeros(16)
-
-    # calculate likelihood for all 4 representations in original state space
-    for i in range(4):
-        save = x_el[3]
-        x_el[3] = x_el[4]
-        x_el[4] = save
-        x_el[2] += 0.5 * np.pi
-        x_el[2] %= 2.0 * np.pi
-        for j in range(4):
-            nu = meas[j] - x_el
-            nu[2] = ((nu[2] + np.pi) % (2*np.pi)) - np.pi
-
-            if len(cov_inv[j]) == 5:
-                ll[i*4+j] = np.exp(-0.5 * np.dot(np.dot(nu, cov_inv[j]), nu)) / np.sqrt(32 * np.pi**5 * cov_det[j])
-            else:
-                ll[i*4+j] = np.exp(-0.5 * np.dot(np.dot(nu[2:], cov_inv[j]), nu[2:])) \
-                            / np.sqrt(8 * np.pi**3 * cov_det[j])
-
-    # return sum or maximum depending on ll_type
-    if ll_type == 'sum':
-        return np.sum(ll)
-    elif ll_type == 'max':
-        return np.max(ll)
-    else:
-        print('Invalid likelihood type')
-        return 0
-
-
 def mwdp_fusion(prior, cov_prior, meas, cov_meas):
     """
     Fuse ellipses A and B in original state space using representation with highest likelihood; assumes independent
@@ -345,10 +290,6 @@ def mwdp_fusion(prior, cov_prior, meas, cov_meas):
 
         # Kalman update
         S_orig_alt = cov_prior + cov_meas_alt
-        if np.linalg.det(S_orig_alt) == 0:
-            print('Singular S_orig')
-            # print(S_orig)
-            continue
         K_orig_alt = np.dot(cov_prior, np.linalg.inv(S_orig_alt))
         innov[k] = meas_alt - prior
         # use shorter angle difference
@@ -424,7 +365,6 @@ def barycenter(particles, w, n_particles, particles_sr=np.zeros(0)):
         bary_sr = np.eye(2)
     conv = False
     # loop until convergence
-    print(bary)
     while not conv:
         res = np.zeros((n_particles, 2, 2))
         for i in range(n_particles):
@@ -438,7 +378,6 @@ def barycenter(particles, w, n_particles, particles_sr=np.zeros(0)):
         diff = np.sum(abs(bary_new - bary))
         conv = diff < 1e-6
         bary = bary_new
-        print(bary)
 
     # Calculate mean and Barycenter in SR space
     result = np.zeros(5)
